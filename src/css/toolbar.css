@@ -1,0 +1,235 @@
+/* Top Bar & Toolbars */
+.ws-topbar {
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 12px;
+  background: var(--bg-surface-0);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ws-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.btn-icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.btn-icon-text:hover {
+  background: var(--bg-surface-2);
+}
+
+.btn-icon-text svg {
+  color: var(--accent-primary);
+}
+
+.brand-wordmark {
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+}
+
+.topbar-sep {
+  color: var(--border-strong);
+}
+
+.project-name-input {
+  width: 170px;
+  height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 12.5px;
+}
+
+.project-name-input:hover {
+  border-color: var(--border-subtle);
+}
+
+.project-name-input:focus {
+  outline: none;
+  background: var(--bg-canvas);
+  border-color: var(--accent-primary);
+}
+
+.autosave-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ws-topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tool-btn.icon-only {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+
+.tool-btn:hover:not(:disabled) {
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
+}
+
+.tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.zoom-readout {
+  min-width: 48px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-subtle);
+  margin: 0 4px;
+}
+
+.ws-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Primary Category Toolbar */
+.ws-toolbar {
+  min-height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 12px;
+  background: var(--bg-surface-1);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+
+.tool-categories {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.cat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.cat-btn:hover {
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
+}
+
+.cat-btn.active {
+  background: var(--accent-primary-tint);
+  border-color: rgba(59, 130, 246, 0.45);
+  color: #93c5fd;
+}
+
+.subtool-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-subtle);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.subtool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.subtool-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.subtool-btn.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #ffffff;
+}
+
+.toolbar-units-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.unit-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}

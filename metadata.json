@@ -1,0 +1,6 @@
+{
+  "name": "ImageRatio",
+  "description": "Image measurement, geometric proportion analysis, and sketching assistant for artists and illustrators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

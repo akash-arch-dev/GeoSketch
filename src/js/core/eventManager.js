@@ -1,9 +1,12 @@
 /**
- * Canvas Event Manager: Navigation (Zoom/Pan), Object Manipulation, Tool Delegation & Keyboard Shortcuts.
+ * GeoSketch Canvas Event Manager
+ * Handles Navigation (Zoom/Pan/Space+Drag/Middle-Click), Marquee & Object Selection,
+ * Snapped Handle Manipulation, Tool Delegation, and Customizable Keyboard Shortcuts.
  */
 import { constrainLineAngle } from '../geometry/lines.js';
 import { getShapeWorldVertices } from '../geometry/transformations.js';
 import { boundingBox, rotatePoint } from '../geometry/points.js';
+import { resolveSnap } from './snapEngine.js';
 
 export class EventManager {
   constructor(app, viewportEl) {
@@ -56,8 +59,10 @@ export class EventManager {
     this.viewport.focus({ preventScroll: true });
 
     const sc = this.getScreenCoords(e);
-    // Middle mouse button OR Space+LeftClick => Pan
-    if (e.button === 1 || (this.spaceDown && e.button === 0)) {
+    const state = this.app.state;
+
+    // Navigation guard: Middle mouse OR Space+LeftClick OR Pan tool => Pan only, prevent accidental drawing
+    if (e.button === 1 || ((this.spaceDown || state.activeTool === 'pan') && e.button === 0)) {
       e.preventDefault();
       this.isPanning = true;
       this.panLast = sc;
@@ -68,7 +73,6 @@ export class EventManager {
     if (e.button !== 0) return;
 
     const imgPt = this.app.coords.screenToImage(sc.x, sc.y);
-    const state = this.app.state;
     const tol = this.app.coords.screenDistToImageDist(10);
 
     if (state.activeTool === 'select') {
@@ -104,6 +108,8 @@ export class EventManager {
       return;
     }
 
+    if (state.activeTool === 'pan' || this.spaceDown) return;
+
     const tool = this.app.getActiveToolController();
     if (tool && tool.onPointerMove) {
       const preview = tool.onPointerMove(imgPt, e, state);
@@ -126,11 +132,19 @@ export class EventManager {
     const state = this.app.state;
 
     if (state.activeTool === 'select' && this.selectDrag) {
+      if (this.selectDrag.mode === 'marquee') {
+        this.commitMarqueeSelection(this.selectDrag, e, state);
+        this.selectDrag = null;
+        this.app.onStateChanged({ skipHistory: true, skipAutosave: true });
+        return;
+      }
       this.app.history.commitBatch(state);
       this.selectDrag = null;
       this.app.onStateChanged();
       return;
     }
+
+    if (state.activeTool === 'pan') return;
 
     const tool = this.app.getActiveToolController();
     if (tool && tool.onPointerUp) {
@@ -196,15 +210,33 @@ export class EventManager {
       return;
     }
 
-    // 3. Clicked empty space
+    // 3. Clicked empty space -> start marquee box selection
     if (!additive && state.selectedIds.length > 0) {
       state.selectedIds = [];
-      this.app.onStateChanged({ skipAutosave: true });
+      this.app.onStateChanged({ skipHistory: true, skipAutosave: true });
     }
+    this.selectDrag = {
+      mode: 'marquee',
+      startPt: { ...imgPt },
+      currPt: { ...imgPt },
+    };
   }
 
   handleSelectPointerMove(imgPt, e, state) {
     const drag = this.selectDrag;
+
+    if (drag.mode === 'marquee') {
+      drag.currPt = { ...imgPt };
+      const rect = {
+        x: Math.min(drag.startPt.x, drag.currPt.x),
+        y: Math.min(drag.startPt.y, drag.currPt.y),
+        width: Math.abs(drag.currPt.x - drag.startPt.x),
+        height: Math.abs(drag.currPt.y - drag.startPt.y),
+      };
+      this.app.renderCanvas({ type: 'marquee', rect });
+      return;
+    }
+
     const dx = imgPt.x - drag.startPt.x;
     const dy = imgPt.y - drag.startPt.y;
 
@@ -262,30 +294,38 @@ export class EventManager {
       const item = found.item;
       const init = drag.initialObj;
 
+      let snapPreview = null;
+      const snapped = resolveSnap(imgPt, state, this.app.coords, {
+        bypass: e.altKey,
+        excludeIds: [item.id],
+      });
+
       if (hit.category === 'line') {
         const other = hit.handleType === 'p1' ? item.p2 : item.p1;
-        const target = e.shiftKey ? constrainLineAngle(other, imgPt, 45) : imgPt;
+        const target = e.shiftKey ? constrainLineAngle(other, snapped, 45) : snapped;
         item[hit.handleType].x = target.x;
         item[hit.handleType].y = target.y;
+        snapPreview = snapped.snapped ? { type: 'snapOnly', snap: snapped } : null;
       } else if (hit.category === 'angle') {
-        item[hit.handleType].x = imgPt.x;
-        item[hit.handleType].y = imgPt.y;
+        item[hit.handleType].x = snapped.x;
+        item[hit.handleType].y = snapped.y;
+        snapPreview = snapped.snapped ? { type: 'snapOnly', snap: snapped } : null;
       } else if (hit.category === 'shape') {
         if (hit.handleType === 'perspectiveCorner') {
-          item.perspectiveCorners[hit.index] = { x: imgPt.x, y: imgPt.y };
+          item.perspectiveCorners[hit.index] = { x: snapped.x, y: snapped.y };
+          snapPreview = snapped.snapped ? { type: 'snapOnly', snap: snapped } : null;
         } else if (hit.handleType === 'rotate') {
           const cx = hit.cx;
           const cy = hit.cy;
-          let deg = ((Math.atan2(imgPt.y - cy, imgPt.x - cx) * 180) / Math.PI) + 90;
+          let deg = (Math.atan2(imgPt.y - cy, imgPt.x - cx) * 180) / Math.PI + 90;
           if (e.shiftKey) deg = Math.round(deg / 15) * 15;
           item.rotation = ((deg % 360) + 360) % 360;
         } else if (hit.handleType === 'polyVertex') {
-          // Inverse affine if needed, or direct edit when unrotated
           const cx = item.x + item.width * 0.5;
           const cy = item.y + item.height * 0.5;
           const rotRad = -((item.rotation || 0) * Math.PI) / 180;
           const localPt =
-            Math.abs(item.rotation || 0) > 1e-4 ? rotatePoint(imgPt, { x: cx, y: cy }, rotRad) : imgPt;
+            Math.abs(item.rotation || 0) > 1e-4 ? rotatePoint(snapped, { x: cx, y: cy }, rotRad) : snapped;
           item.points[hit.index] = { x: localPt.x, y: localPt.y };
           const b = boundingBox(item.points);
           item.x = b.minX;
@@ -293,31 +333,64 @@ export class EventManager {
           item.width = Math.max(4, b.width);
           item.height = Math.max(4, b.height);
           item.localBounds = { ...b };
+          snapPreview = snapped.snapped ? { type: 'snapOnly', snap: snapped } : null;
         } else if (hit.handleType === 'resizeCorner') {
           this.resizeShapeByCorner(item, init, hit.index, imgPt, e.shiftKey);
         }
       }
 
-      this.app.renderCanvas();
+      this.app.renderCanvas(snapPreview);
       this.app.ui.refreshInspectorLive();
     }
   }
 
+  commitMarqueeSelection(drag, e, state) {
+    const minX = Math.min(drag.startPt.x, drag.currPt.x);
+    const maxX = Math.max(drag.startPt.x, drag.currPt.x);
+    const minY = Math.min(drag.startPt.y, drag.currPt.y);
+    const maxY = Math.max(drag.startPt.y, drag.currPt.y);
+    if (maxX - minX < 4 && maxY - minY < 4) return;
+
+    const inBox = (pt) => pt.x >= minX && pt.x <= maxX && pt.y >= minY && pt.y <= maxY;
+    const hits = [];
+
+    for (const l of state.lines) {
+      if (l.visible !== false && (inBox(l.p1) || inBox(l.p2))) hits.push(l.id);
+    }
+    for (const s of state.shapes) {
+      if (s.visible === false) continue;
+      const verts = getShapeWorldVertices(s);
+      const b = boundingBox(verts);
+      if (!(b.maxX < minX || b.minX > maxX || b.maxY < minY || b.minY > maxY)) {
+        hits.push(s.id);
+      }
+    }
+    for (const a of state.angles) {
+      if (a.visible !== false && (inBox(a.p1) || inBox(a.vertex) || inBox(a.p2))) hits.push(a.id);
+    }
+
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      for (const id of hits) {
+        if (!state.selectedIds.includes(id)) state.selectedIds.push(id);
+      }
+    } else {
+      state.selectedIds = hits;
+    }
+  }
+
   resizeShapeByCorner(shape, init, cornerIdx, imgPt, shiftKey) {
-    // Rotate cursor point back into shape's unrotated coordinate frame around initial center
     const icx = init.x + init.width * 0.5;
     const icy = init.y + init.height * 0.5;
     const rotRad = ((init.rotation || 0) * Math.PI) / 180;
     const localCursor = rotatePoint(imgPt, { x: icx, y: icy }, -rotRad);
 
-    // Opposite corner in unrotated frame stays anchored
     const hw = init.width * 0.5;
     const hh = init.height * 0.5;
     const localCorners = [
-      { x: icx - hw, y: icy - hh }, // 0 TL
-      { x: icx + hw, y: icy - hh }, // 1 TR
-      { x: icx + hw, y: icy + hh }, // 2 BR
-      { x: icx - hw, y: icy + hh }, // 3 BL
+      { x: icx - hw, y: icy - hh },
+      { x: icx + hw, y: icy - hh },
+      { x: icx + hw, y: icy + hh },
+      { x: icx - hw, y: icy + hh },
     ];
     const anchor = localCorners[(cornerIdx + 2) % 4];
     let newW = Math.max(6, Math.abs(localCursor.x - anchor.x));
@@ -352,13 +425,30 @@ export class EventManager {
       }));
       shape.localBounds = boundingBox(shape.points);
     }
-    void getShapeWorldVertices;
   }
 
   onKeyDown(e) {
+    // Allow shortcut rebind capture modal to intercept if active
+    if (this.app.isCapturingShortcut) return;
+
+    const modalOpen = !document.getElementById('modal-backdrop')?.classList.contains('hidden');
+    if (modalOpen) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.app.closeActiveModal();
+      }
+      return;
+    }
+
     if (this.app.currentScreen !== 'workspace') return;
-    const tag = document.activeElement?.tagName;
-    const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+
+    const activeEl = document.activeElement;
+    const tag = activeEl?.tagName;
+    const isTyping =
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'SELECT' ||
+      Boolean(activeEl?.isContentEditable);
 
     if (e.code === 'Space' && !isTyping) {
       e.preventDefault();
@@ -369,76 +459,28 @@ export class EventManager {
       return;
     }
 
-    const ctrl = e.ctrlKey || e.metaKey;
-
-    if (ctrl && e.key.toLowerCase() === 'z') {
-      e.preventDefault();
-      if (e.shiftKey) this.app.redo();
-      else this.app.undo();
-      return;
-    }
-    if (ctrl && e.key.toLowerCase() === 'y') {
-      e.preventDefault();
-      this.app.redo();
-      return;
-    }
-
-    if (isTyping) return;
-
-    if (ctrl && e.key.toLowerCase() === 'c') {
-      e.preventDefault();
-      const count = this.app.selection.copySelected(this.app.state);
-      if (count > 0) this.app.notify(`Copied ${count} object${count > 1 ? 's' : ''}.`);
-      return;
-    }
-
-    if (ctrl && e.key.toLowerCase() === 'v') {
-      e.preventDefault();
-      this.app.pasteSelected();
-      return;
-    }
-
-    if (ctrl && e.key.toLowerCase() === 'd') {
-      e.preventDefault();
-      this.app.duplicateSelected();
-      return;
-    }
-
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      e.preventDefault();
-      this.app.deleteSelected();
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      const tool = this.app.getActiveToolController();
-      if (tool && tool.cancel) tool.cancel();
-      this.selectDrag = null;
-      this.app.renderCanvas();
-      this.app.ui.updateHintBanner();
-      return;
-    }
-
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !isTyping) {
       if (this.app.state.activeTool === 'shape' && this.app.state.subTools.shape === 'customPolygon') {
         this.app.tools.shape.commitCustomPolygon(this.app.state);
       }
       return;
     }
 
-    // Tool shortcuts
-    const k = e.key.toLowerCase();
-    if (k === 'v') this.app.setActiveTool('select');
-    else if (k === 'g') this.app.setActiveTool('guides');
-    else if (k === 'c') this.app.setActiveTool('cropScale');
-    else if (k === 'l') this.app.setActiveTool('line');
-    else if (k === 's') this.app.setActiveTool('shape');
-    else if (k === 'a') this.app.setActiveTool('angle');
-    else if (k === '0') this.app.fitToScreen();
-    else if (k === '1') this.app.resetZoom();
-    else if (k === '=' || k === '+') this.app.zoomBy(1.2);
-    else if (k === '-') this.app.zoomBy(1 / 1.2);
+    // Ignore non-modifier shortcuts while typing inside inputs
+    const hasModifier = e.ctrlKey || e.metaKey || e.altKey;
+    if (isTyping && !hasModifier && e.key !== 'Escape') return;
+    if (isTyping && (e.key === 'Delete' || e.key === 'Backspace')) return;
+
+    const actionId = this.app.shortcuts.matchEvent(e);
+    if (!actionId) return;
+
+    // Allow browser text copy/paste/select-all inside inputs
+    if (isTyping && ['copy', 'paste', 'selectAll', 'undo', 'redo'].includes(actionId)) {
+      return;
+    }
+
+    e.preventDefault();
+    this.app.executeAction(actionId);
   }
 
   onKeyUp(e) {
@@ -448,11 +490,15 @@ export class EventManager {
     }
   }
 
+  cancelActiveDrag() {
+    this.selectDrag = null;
+  }
+
   updateCursor() {
     this.viewport.classList.remove('cursor-crosshair', 'cursor-grab', 'cursor-grabbing', 'cursor-move');
     if (this.isPanning) {
       this.viewport.classList.add('cursor-grabbing');
-    } else if (this.spaceDown) {
+    } else if (this.spaceDown || this.app.state.activeTool === 'pan') {
       this.viewport.classList.add('cursor-grab');
     } else if (this.app.state.activeTool !== 'select') {
       this.viewport.classList.add('cursor-crosshair');

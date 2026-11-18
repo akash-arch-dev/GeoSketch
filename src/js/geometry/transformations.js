@@ -7,8 +7,9 @@ import {
   computePolygonSummary,
   ellipsePerimeter,
   ellipseArea,
+  polygonCentroid,
 } from './polygons.js';
-import { boundingBox } from './points.js';
+import { boundingBox, distance } from './points.js';
 
 /**
  * Apply 2D affine transform centered around local (0,0) then translated to (cx, cy):
@@ -128,7 +129,6 @@ export function getAffineBoxCorners(shape) {
 
 /**
  * Returns the active 4 perspective corners [TL, TR, BR, BL] in image space.
- * If perspective mode is active with custom corners, returns those; otherwise computes from affine box.
  */
 export function getShapePerspectiveQuad(shape) {
   if (shape.perspectiveCorners && shape.perspectiveCorners.length === 4) {
@@ -196,7 +196,6 @@ export function getShapeWorldVertices(shape) {
   if (shape.type === 'customPolygon' || shape.type === 'freehand') {
     const pts = shape.points || [];
     if (isPerspective) {
-      // Normalized relative to original bounding box center/size
       const b = shape.localBounds || boundingBox(pts);
       const bw = Math.max(1, b.width);
       const bh = Math.max(1, b.height);
@@ -206,7 +205,6 @@ export function getShapeWorldVertices(shape) {
         return applyHomography(H, nx, ny);
       });
     }
-    // Check if affine transforms are applied on custom polygon
     const hasAffine =
       Math.abs(shape.rotation || 0) > 1e-6 ||
       Math.abs((shape.scaleX ?? 1) - 1) > 1e-6 ||
@@ -225,7 +223,36 @@ export function getShapeWorldVertices(shape) {
 }
 
 /**
- * Compute comprehensive Original vs Displayed (Distorted) measurements for any shape.
+ * Compute triangle altitude (base edge B->C, apex A, and perpendicular foot on infinite line BC).
+ */
+export function computeTriangleAltitude(vertices) {
+  if (!vertices || vertices.length !== 3) return null;
+  // Base is edge [1] -> [2] (bottom edge of constructed triangle), apex is [0]
+  const apex = vertices[0];
+  const b1 = vertices[1];
+  const b2 = vertices[2];
+  const dx = b2.x - b1.x;
+  const dy = b2.y - b1.y;
+  const baseLen = Math.hypot(dx, dy);
+  if (baseLen < 1e-7) return null;
+  const t = ((apex.x - b1.x) * dx + (apex.y - b1.y) * dy) / (baseLen * baseLen);
+  const foot = {
+    x: b1.x + t * dx,
+    y: b1.y + t * dy,
+  };
+  const heightPx = distance(apex, foot);
+  return {
+    apex,
+    b1,
+    b2,
+    foot,
+    basePx: baseLen,
+    heightPx,
+  };
+}
+
+/**
+ * Compute comprehensive Original vs Displayed (Distorted) measurements and Smart Annotation geometry.
  */
 export function computeShapeMeasurements(shape) {
   const isDistorted =
@@ -282,25 +309,58 @@ export function computeShapeMeasurements(shape) {
     perimeterPx: origPerimeter,
     sideLengthsPx: origSideLengths,
     internalAnglesDeg: origAngles,
-    diagonalsPx: shape.type === 'rectangle' || shape.type === 'square'
-      ? [{ from: 0, to: 2, lengthPx: Math.hypot(origW, origH) }, { from: 1, to: 3, lengthPx: Math.hypot(origW, origH) }]
-      : [],
+    diagonalsPx:
+      shape.type === 'rectangle' || shape.type === 'square'
+        ? [
+            { from: 0, to: 2, lengthPx: Math.hypot(origW, origH) },
+            { from: 1, to: 3, lengthPx: Math.hypot(origW, origH) },
+          ]
+        : [],
   };
 
   // Displayed Geometry
   const worldVerts = getShapeWorldVertices(shape);
-  let displayed;
+  const isPersp = Boolean(shape.perspectiveEnabled && shape.perspectiveCorners?.length === 4);
+  const H = isPersp ? getShapeHomography(shape) : null;
+  const mapPt = (lx, ly) => (isPersp ? applyHomography(H, lx, ly) : applyAffineToLocalPoint(lx, ly, shape));
+  const center =
+    shape.type === 'circle' || shape.type === 'ellipse'
+      ? mapPt(0, 0)
+      : worldVerts.length >= 3
+      ? polygonCentroid(worldVerts)
+      : { x: shape.x + shape.width * 0.5, y: shape.y + shape.height * 0.5 };
 
-  if ((shape.type === 'circle' || shape.type === 'ellipse') && !shape.perspectiveEnabled && Math.abs(shape.skewX || 0) < 1e-4 && Math.abs(shape.skewY || 0) < 1e-4) {
-    const rx = (origW * Math.abs(shape.scaleX ?? 1)) * 0.5;
-    const ry = (origH * Math.abs(shape.scaleY ?? 1)) * 0.5;
+  let displayed;
+  const isPureEllipse =
+    (shape.type === 'circle' || shape.type === 'ellipse') &&
+    !shape.perspectiveEnabled &&
+    Math.abs(shape.skewX || 0) < 1e-4 &&
+    Math.abs(shape.skewY || 0) < 1e-4;
+
+  if (isPureEllipse) {
+    const rx = origW * Math.abs(shape.scaleX ?? 1) * 0.5;
+    const ry = origH * Math.abs(shape.scaleY ?? 1) * 0.5;
     const dispSummary = computePolygonSummary(worldVerts);
+    const axisXEnd1 = mapPt(-origW * 0.5, 0);
+    const axisXEnd2 = mapPt(origW * 0.5, 0);
+    const axisYEnd1 = mapPt(0, -origH * 0.5);
+    const axisYEnd2 = mapPt(0, origH * 0.5);
+
+    const majorIsX = rx >= ry;
     displayed = {
       widthPx: dispSummary.widthPx,
       heightPx: dispSummary.heightPx,
       aspectRatio: dispSummary.heightPx > 1e-7 ? dispSummary.widthPx / dispSummary.heightPx : 0,
+      center,
       rxPx: rx,
       ryPx: ry,
+      radiusPx: Math.abs(rx - ry) < 0.5 ? rx : null,
+      diameterPx: Math.abs(rx - ry) < 0.5 ? rx * 2 : null,
+      majorAxisPx: Math.max(rx, ry) * 2,
+      minorAxisPx: Math.min(rx, ry) * 2,
+      majorAxisEndpoints: majorIsX ? [axisXEnd1, axisXEnd2] : [axisYEnd1, axisYEnd2],
+      minorAxisEndpoints: majorIsX ? [axisYEnd1, axisYEnd2] : [axisXEnd1, axisXEnd2],
+      rotationDeg: shape.rotation || 0,
       areaPx2: ellipseArea(rx, ry),
       perimeterPx: ellipsePerimeter(rx, ry),
       sideLengthsPx: [],
@@ -312,15 +372,19 @@ export function computeShapeMeasurements(shape) {
     };
   } else {
     const dispSummary = computePolygonSummary(worldVerts);
+    const triangleAlt = shape.type === 'triangle' ? computeTriangleAltitude(worldVerts) : null;
     displayed = {
       widthPx: dispSummary.widthPx,
       heightPx: dispSummary.heightPx,
       aspectRatio: dispSummary.aspectRatio,
+      center,
       areaPx2: dispSummary.areaPx2,
       perimeterPx: dispSummary.perimeterPx,
-      sideLengthsPx: (shape.type === 'circle' || shape.type === 'ellipse') ? [] : dispSummary.sideLengthsPx,
-      internalAnglesDeg: (shape.type === 'circle' || shape.type === 'ellipse') ? [] : dispSummary.internalAnglesDeg,
-      diagonalsPx: (shape.type === 'circle' || shape.type === 'ellipse') ? [] : dispSummary.diagonalsPx.slice(0, 6),
+      sideLengthsPx: shape.type === 'circle' || shape.type === 'ellipse' ? [] : dispSummary.sideLengthsPx,
+      internalAnglesDeg: shape.type === 'circle' || shape.type === 'ellipse' ? [] : dispSummary.internalAnglesDeg,
+      diagonalsPx:
+        shape.type === 'circle' || shape.type === 'ellipse' ? [] : dispSummary.diagonalsPx.slice(0, 6),
+      triangleAltitude: triangleAlt,
     };
   }
 

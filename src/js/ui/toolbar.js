@@ -1,5 +1,5 @@
 /**
- * Top Toolbar & Sub-Tool Strip Controller
+ * GeoSketch Top Toolbar & Sub-Tool Strip Controller
  */
 import { SUPPORTED_UNITS } from '../geometry/measurements.js';
 
@@ -13,6 +13,8 @@ export class ToolbarUI {
     this.zoomReadout = document.getElementById('topbar-zoom-readout');
     this.undoBtn = document.getElementById('btn-undo');
     this.redoBtn = document.getElementById('btn-redo');
+    this.snapBtn = document.getElementById('btn-toggle-snap');
+    this.viewBtn = document.getElementById('btn-display-settings');
     this.hintBanner = document.getElementById('canvas-hint-banner');
     this.projectMenuBtn = document.getElementById('btn-project-menu');
     this.projectDropdown = document.getElementById('project-menu-dropdown');
@@ -25,6 +27,8 @@ export class ToolbarUI {
         this.app.setActiveTool(btn.dataset.tool);
       });
     }
+
+    this.unitSelect.innerHTML = SUPPORTED_UNITS.map((u) => `<option value="${u}">${u}</option>`).join('');
 
     this.unitSelect.addEventListener('change', () => {
       const unit = this.unitSelect.value;
@@ -40,14 +44,23 @@ export class ToolbarUI {
       this.app.onStateChanged({ skipHistory: true });
     });
 
-    document.getElementById('btn-undo').addEventListener('click', () => this.app.undo());
-    document.getElementById('btn-redo').addEventListener('click', () => this.app.redo());
+    this.undoBtn.addEventListener('click', () => this.app.undo());
+    this.redoBtn.addEventListener('click', () => this.app.redo());
     document.getElementById('btn-zoom-in').addEventListener('click', () => this.app.zoomBy(1.25));
     document.getElementById('btn-zoom-out').addEventListener('click', () => this.app.zoomBy(1 / 1.25));
     document.getElementById('btn-fit-screen').addEventListener('click', () => this.app.fitToScreen());
     document.getElementById('btn-reset-zoom').addEventListener('click', () => this.app.resetZoom());
     document.getElementById('btn-back-upload').addEventListener('click', () => this.app.showUploadScreen());
     document.getElementById('btn-export-png-quick').addEventListener('click', () => this.app.exportPng());
+
+    this.snapBtn.addEventListener('click', () => {
+      this.app.state.snapping.enabled = !this.app.state.snapping.enabled;
+      this.app.onStateChanged({ skipHistory: true });
+    });
+
+    this.viewBtn.addEventListener('click', () => this.app.openDisplaySettingsModal());
+    document.getElementById('btn-command-palette').addEventListener('click', () => this.app.openCommandPalette());
+    document.getElementById('btn-shortcuts-help').addEventListener('click', () => this.app.openShortcutsModal());
 
     this.projectNameInput.addEventListener('change', () => {
       const val = this.projectNameInput.value.trim() || 'Untitled Study';
@@ -71,9 +84,6 @@ export class ToolbarUI {
       this.projectDropdown.classList.add('hidden');
       this.app.handleProjectAction(btn.dataset.action);
     });
-
-    // Populate unit options cleanly
-    this.unitSelect.innerHTML = SUPPORTED_UNITS.map((u) => `<option value="${u}">${u}</option>`).join('');
   }
 
   sync(state) {
@@ -81,23 +91,56 @@ export class ToolbarUI {
       btn.classList.toggle('active', btn.dataset.tool === state.activeTool);
     }
 
+    this.updateShortcutTooltips();
+
     this.projectNameInput.value = state.projectName || 'Untitled Study';
     this.unitSelect.value = state.calibration.displayUnit || 'px';
     this.precisionSelect.value = String(state.calibration.precision ?? 2);
 
     this.undoBtn.disabled = !this.app.history.canUndo();
     this.redoBtn.disabled = !this.app.history.canRedo();
+    this.snapBtn.classList.toggle('active', Boolean(state.snapping.enabled));
 
     this.renderSubTools(state);
     this.updateHintBanner();
     this.updateZoomReadout();
   }
 
+  updateShortcutTooltips() {
+    const s = this.app.shortcuts;
+    const map = {
+      select: `Select, Move & Edit (${s.getCombo('toolSelect')})`,
+      pan: `Pan Canvas (${s.getCombo('toolPan')} or Space+Drag)`,
+      guides: `Visual Guides (${s.getCombo('toolGuides')})`,
+      cropScale: `Crop & Scale (${s.getCombo('toolCropScale')})`,
+      line: `Line Measurement (${s.getCombo('toolLine')})`,
+      shape: `Shapes (${s.getCombo('toolRect')} Rect · ${s.getCombo('toolCircle')} Circle · ${s.getCombo('toolEllipse')} Ellipse · ${s.getCombo('toolPolygon')} Polygon)`,
+      angle: `Angle Measurement (${s.getCombo('toolAngle')})`,
+    };
+    for (const btn of this.catButtons) {
+      if (map[btn.dataset.tool]) btn.title = map[btn.dataset.tool];
+    }
+    this.undoBtn.title = `Undo (${s.getCombo('undo')})`;
+    this.redoBtn.title = `Redo (${s.getCombo('redo')})`;
+    document.getElementById('btn-fit-screen').title = `Fit Image to Screen (${s.getCombo('fitScreen')})`;
+    document.getElementById('btn-reset-zoom').title = `Reset Zoom to 100% (${s.getCombo('zoom100')})`;
+    document.getElementById('btn-zoom-in').title = `Zoom In (${s.getCombo('zoomIn')})`;
+    document.getElementById('btn-zoom-out').title = `Zoom Out (${s.getCombo('zoomOut')})`;
+    document.getElementById('btn-command-palette').title = `Command Palette (${s.getCombo('commandPalette')})`;
+    document.getElementById('btn-shortcuts-help').title = `Keyboard Shortcuts (${s.getCombo('shortcutsHelp')})`;
+  }
+
   renderSubTools(state) {
     const toolName = state.activeTool;
     if (toolName === 'select') {
       this.subStrip.innerHTML = `
-        <span class="section-subtitle" style="padding: 0 4px;">Click objects to select &middot; Shift+Click for multi-select &middot; Drag handles to resize/rotate/distort</span>
+        <span class="section-subtitle" style="padding: 0 4px;">Click or drag box to select &middot; Shift+Click multi-select &middot; Drag handles to resize, rotate, or warp</span>
+      `;
+      return;
+    }
+    if (toolName === 'pan') {
+      this.subStrip.innerHTML = `
+        <span class="section-subtitle" style="padding: 0 4px;">Drag canvas to pan safely without creating or editing geometry &middot; Wheel to zoom</span>
       `;
       return;
     }

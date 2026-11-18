@@ -1,5 +1,5 @@
 /**
- * Right Sidebar: Contextual Tool & Selected Object Properties Inspector
+ * Right Sidebar: Contextual Tool, Smart Annotations, Snapping & Selected Object Properties Inspector
  */
 import { computeLineMetrics } from '../geometry/lines.js';
 import { computeAngleMetrics } from '../geometry/angles.js';
@@ -27,7 +27,6 @@ export class PropertiesPanel {
   }
 
   render(state) {
-    // Priority: if an object is selected in Select mode (or single object selected), show its properties + tool context
     const selectedFound =
       state.selectedIds.length === 1
         ? this.app.selection.findObjectById(state, state.selectedIds[0])
@@ -57,7 +56,6 @@ export class PropertiesPanel {
       return;
     }
 
-    // Otherwise render active tool properties
     switch (state.activeTool) {
       case 'guides':
         this.renderVisualGuidesInspector(state);
@@ -82,6 +80,10 @@ export class PropertiesPanel {
 
   renderWorkspaceOverviewInspector(state) {
     const cal = state.calibration;
+    const d = state.display;
+    const sn = state.snapping;
+    const rc = state.renderConfig;
+
     this.container.innerHTML = `
       <div class="panel-section">
         <div class="section-header">
@@ -99,13 +101,61 @@ export class PropertiesPanel {
           <input id="img-opacity-range" type="range" min="0.1" max="1" step="0.05" value="${state.image.opacity ?? 1}" class="range-input" style="max-width:140px;" />
         </div>
       </div>
+
       <div class="panel-section">
-        <h3 class="section-title">Quick Actions</h3>
-        <div class="action-row">
-          <button type="button" class="btn btn-sm btn-secondary" data-jump-tool="guides">Configure Grid</button>
-          <button type="button" class="btn btn-sm btn-secondary" data-jump-tool="cropScale" data-jump-sub="scale">Calibrate Scale</button>
-          <button type="button" class="btn btn-sm btn-secondary" data-jump-tool="line">Draw Line</button>
-          <button type="button" class="btn btn-sm btn-secondary" data-jump-tool="shape">Draw Shape</button>
+        <div class="section-header">
+          <h3 class="section-title">Smart Annotations &amp; Visibility</h3>
+        </div>
+        <label class="checkbox-row"><span>Show Measurements</span><input type="checkbox" data-disp="showMeasurements" ${d.showMeasurements !== false ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Show Labels</span><input type="checkbox" data-disp="showLabels" ${d.showLabels !== false ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Show Object Names</span><input type="checkbox" data-disp="showObjectNames" ${d.showObjectNames !== false ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Show Control Points</span><input type="checkbox" data-disp="showControlPoints" ${d.showControlPoints !== false ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Show Selection Handles</span><input type="checkbox" data-disp="showHandles" ${d.showHandles !== false ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Smart Geometry Explainers</span><input type="checkbox" data-disp="showSmartGeometry" ${d.showSmartGeometry !== false ? 'checked' : ''} /></label>
+        <div class="field">
+          <span class="field-label">Smart Geometry Scope</span>
+          <select id="sel-smart-scope" class="select">
+            <option value="selected" ${d.smartAnnotationScope === 'selected' ? 'selected' : ''}>Selected Object Only (Clean)</option>
+            <option value="all" ${d.smartAnnotationScope === 'all' ? 'selected' : ''}>All Objects</option>
+            <option value="none" ${d.smartAnnotationScope === 'none' ? 'selected' : ''}>Off</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-header">
+          <h3 class="section-title">Construction Snapping</h3>
+          <input type="checkbox" id="chk-snap-master" ${sn.enabled ? 'checked' : ''} title="Enable/Disable Snapping" />
+        </div>
+        <label class="checkbox-row"><span>Grid Intersections</span><input type="checkbox" data-snap="snapGrid" ${sn.snapGrid ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Endpoints &amp; Vertices</span><input type="checkbox" data-snap="snapEndpoints" ${sn.snapEndpoints ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Centers &amp; Midpoints</span><input type="checkbox" data-snap="snapCenters" ${sn.snapCenters ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>Line Intersections</span><input type="checkbox" data-snap="snapIntersections" ${sn.snapIntersections ? 'checked' : ''} /></label>
+        <label class="checkbox-row"><span>H / V Alignment Guides</span><input type="checkbox" data-snap="snapAlignment" ${sn.snapAlignment ? 'checked' : ''} /></label>
+        <div class="field-inline">
+          <label for="inp-snap-sens">Sensitivity (${sn.sensitivityPx} px)</label>
+          <input id="inp-snap-sens" type="range" min="4" max="28" step="1" value="${sn.sensitivityPx}" class="range-input" style="max-width:130px;" />
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="section-header">
+          <h3 class="section-title">Zoom-Adaptive Overlays</h3>
+        </div>
+        <div class="field">
+          <span class="field-label">Line &amp; Shape Stroke Mode</span>
+          <select id="sel-rc-line" class="select">
+            <option value="screen-constant" ${rc.lineScaleMode === 'screen-constant' ? 'selected' : ''}>Screen-Constant Pixels (Recommended)</option>
+            <option value="adaptive" ${rc.lineScaleMode === 'adaptive' ? 'selected' : ''}>Adaptive Clamped</option>
+            <option value="image-scaled" ${rc.lineScaleMode === 'image-scaled' ? 'selected' : ''}>Image-Scaled</option>
+          </select>
+        </div>
+        <div class="field">
+          <span class="field-label">Grid Line Scaling</span>
+          <select id="sel-rc-grid" class="select">
+            <option value="screen-constant" ${rc.gridScaleMode === 'screen-constant' ? 'selected' : ''}>Screen-Constant Hairlines</option>
+            <option value="adaptive" ${rc.gridScaleMode === 'adaptive' ? 'selected' : ''}>Adaptive Readable</option>
+          </select>
         </div>
       </div>
     `;
@@ -118,13 +168,43 @@ export class PropertiesPanel {
       this.app.onStateChanged({ skipHistory: true });
     });
 
-    this.container.querySelectorAll('[data-jump-tool]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (btn.dataset.jumpSub) {
-          state.subTools[btn.dataset.jumpTool] = btn.dataset.jumpSub;
-        }
-        this.app.setActiveTool(btn.dataset.jumpTool);
+    this.container.querySelectorAll('[data-disp]').forEach((chk) => {
+      chk.addEventListener('change', () => {
+        d[chk.dataset.disp] = chk.checked;
+        this.app.onStateChanged({ skipHistory: true });
       });
+    });
+    this.container.querySelector('#sel-smart-scope')?.addEventListener('change', (e) => {
+      d.smartAnnotationScope = e.target.value;
+      this.app.onStateChanged({ skipHistory: true });
+    });
+
+    this.container.querySelector('#chk-snap-master')?.addEventListener('change', (e) => {
+      sn.enabled = e.target.checked;
+      this.app.onStateChanged({ skipHistory: true });
+    });
+    this.container.querySelectorAll('[data-snap]').forEach((chk) => {
+      chk.addEventListener('change', () => {
+        sn[chk.dataset.snap] = chk.checked;
+        this.app.onStateChanged({ skipHistory: true });
+      });
+    });
+    this.container.querySelector('#inp-snap-sens')?.addEventListener('input', (e) => {
+      sn.sensitivityPx = Number(e.target.value);
+      const lbl = this.container.querySelector('label[for="inp-snap-sens"]');
+      if (lbl) lbl.textContent = `Sensitivity (${sn.sensitivityPx} px)`;
+    });
+    this.container.querySelector('#inp-snap-sens')?.addEventListener('change', () => {
+      this.app.onStateChanged({ skipHistory: true });
+    });
+
+    this.container.querySelector('#sel-rc-line')?.addEventListener('change', (e) => {
+      rc.lineScaleMode = e.target.value;
+      this.app.onStateChanged({ skipHistory: true });
+    });
+    this.container.querySelector('#sel-rc-grid')?.addEventListener('change', (e) => {
+      rc.gridScaleMode = e.target.value;
+      this.app.onStateChanged({ skipHistory: true });
     });
   }
 
@@ -170,7 +250,6 @@ export class PropertiesPanel {
     const unit = state.calibration.displayUnit;
     const cal = state.calibration;
 
-    // Convert cell width/height for display if calibrated
     const cwDisplay = convertPixelsToUnit(gr.cellWidth, unit, cal).value;
     const chDisplay = convertPixelsToUnit(gr.cellHeight, unit, cal).value;
     const cellUnitLabel = cal.calibrated && unit !== 'px' ? unit : 'px';
@@ -204,6 +283,11 @@ export class PropertiesPanel {
                 <div class="field"><span class="field-label">Cell Height (${cellUnitLabel})</span><input id="inp-grid-ch" type="number" min="1" step="any" class="input input-mono" value="${Number(chDisplay.toFixed(2))}" ${lockedAttr} /></div>
               </div>`
         }
+
+        <div class="prop-grid-2">
+          <div class="field"><span class="field-label">Offset X (px)</span><input id="inp-grid-ox" type="number" step="1" class="input input-mono" value="${gr.offsetX || 0}" ${lockedAttr} /></div>
+          <div class="field"><span class="field-label">Offset Y (px)</span><input id="inp-grid-oy" type="number" step="1" class="input input-mono" value="${gr.offsetY || 0}" ${lockedAttr} /></div>
+        </div>
 
         <div class="prop-grid-3">
           <div class="field"><span class="field-label">Color</span><input id="inp-grid-color" type="color" class="color-input" value="${gr.color}" ${lockedAttr} /></div>
@@ -268,7 +352,6 @@ export class PropertiesPanel {
       </div>
     `;
 
-    // Event bindings
     this.container.querySelector('#chk-grid-visible')?.addEventListener('change', (e) => {
       this.app.pushUndo('Toggle Grid');
       gr.visible = e.target.checked;
@@ -290,12 +373,8 @@ export class PropertiesPanel {
       });
     });
 
-    this.bindNumInput('#inp-grid-rows', (v) => {
-      gr.rows = Math.max(1, Math.min(100, Math.round(v)));
-    }, 'Grid Rows');
-    this.bindNumInput('#inp-grid-cols', (v) => {
-      gr.columns = Math.max(1, Math.min(100, Math.round(v)));
-    }, 'Grid Columns');
+    this.bindNumInput('#inp-grid-rows', (v) => (gr.rows = Math.max(1, Math.min(100, Math.round(v)))), 'Grid Rows');
+    this.bindNumInput('#inp-grid-cols', (v) => (gr.columns = Math.max(1, Math.min(100, Math.round(v)))), 'Grid Columns');
     this.bindNumInput('#inp-grid-cw', (v) => {
       const px = cal.calibrated && unit !== 'px' ? convertUnitToPixels(v, unit, cal) : v;
       gr.cellWidth = Math.max(4, px);
@@ -304,6 +383,8 @@ export class PropertiesPanel {
       const px = cal.calibrated && unit !== 'px' ? convertUnitToPixels(v, unit, cal) : v;
       gr.cellHeight = Math.max(4, px);
     }, 'Grid Cell Height');
+    this.bindNumInput('#inp-grid-ox', (v) => (gr.offsetX = v), 'Grid Offset X');
+    this.bindNumInput('#inp-grid-oy', (v) => (gr.offsetY = v), 'Grid Offset Y');
 
     this.container.querySelector('#inp-grid-color')?.addEventListener('input', (e) => {
       gr.color = e.target.value;
@@ -311,9 +392,7 @@ export class PropertiesPanel {
     });
     this.container.querySelector('#inp-grid-color')?.addEventListener('change', () => this.app.onStateChanged());
 
-    this.bindNumInput('#inp-grid-thick', (v) => {
-      gr.thickness = Math.max(0.5, Math.min(6, v));
-    }, 'Grid Thickness');
+    this.bindNumInput('#inp-grid-thick', (v) => (gr.thickness = Math.max(0.5, Math.min(6, v))), 'Grid Thickness');
 
     this.container.querySelector('#sel-grid-style')?.addEventListener('change', (e) => {
       this.app.pushUndo('Grid Style');
@@ -323,6 +402,8 @@ export class PropertiesPanel {
 
     this.container.querySelector('#inp-grid-opacity')?.addEventListener('input', (e) => {
       gr.opacity = Number(e.target.value);
+      const lbl = this.container.querySelector('label[for="inp-grid-opacity"]');
+      if (lbl) lbl.textContent = `Grid Opacity (${Math.round(gr.opacity * 100)}%)`;
       this.app.renderCanvas();
     });
     this.container.querySelector('#inp-grid-opacity')?.addEventListener('change', () => this.app.onStateChanged());
@@ -345,21 +426,15 @@ export class PropertiesPanel {
       g.symmetry.axis = e.target.value;
       this.app.onStateChanged();
     });
-    this.bindNumInput('#inp-sym-offset', (v) => {
-      g.symmetry.offset = v;
-    }, 'Symmetry Offset');
+    this.bindNumInput('#inp-sym-offset', (v) => (g.symmetry.offset = v), 'Symmetry Offset');
 
     this.container.querySelector('#inp-guide-color')?.addEventListener('input', (e) => {
       g.guideColor = e.target.value;
       this.app.renderCanvas();
     });
     this.container.querySelector('#inp-guide-color')?.addEventListener('change', () => this.app.onStateChanged());
-    this.bindNumInput('#inp-guide-thick', (v) => {
-      g.guideThickness = Math.max(0.5, Math.min(5, v));
-    }, 'Guide Thickness');
-    this.bindNumInput('#inp-guide-opacity', (v) => {
-      g.guideOpacity = Math.max(0.05, Math.min(1, v));
-    }, 'Guide Opacity');
+    this.bindNumInput('#inp-guide-thick', (v) => (g.guideThickness = Math.max(0.5, Math.min(5, v))), 'Guide Thickness');
+    this.bindNumInput('#inp-guide-opacity', (v) => (g.guideOpacity = Math.max(0.05, Math.min(1, v))), 'Guide Opacity');
 
     this.container.querySelector('#chk-custom-guides')?.addEventListener('change', (e) => {
       this.app.pushUndo('Toggle Custom Guides');
@@ -460,7 +535,6 @@ export class PropertiesPanel {
       </div>
     `;
 
-    // Crop bindings
     this.container.querySelector('#sel-crop-aspect')?.addEventListener('change', (e) => {
       c.aspectPreset = e.target.value;
       const ratio = getTargetAspectRatio(c);
@@ -479,35 +553,16 @@ export class PropertiesPanel {
       this.app.onStateChanged({ skipHistory: true, skipAutosave: true });
     });
 
-    this.bindNumInput('#inp-crop-cw', (v) => {
-      c.customW = Math.max(0.1, v);
-    }, 'Crop Aspect W', true);
-    this.bindNumInput('#inp-crop-ch', (v) => {
-      c.customH = Math.max(0.1, v);
-    }, 'Crop Aspect H', true);
+    this.bindNumInput('#inp-crop-cw', (v) => (c.customW = Math.max(0.1, v)), 'Crop Aspect W', true);
+    this.bindNumInput('#inp-crop-ch', (v) => (c.customH = Math.max(0.1, v)), 'Crop Aspect H', true);
+    this.bindNumInput('#inp-crop-x', (v) => (c.draftX = Math.max(0, Math.min(state.image.width - c.draftWidth, v))), 'Crop X', true);
+    this.bindNumInput('#inp-crop-y', (v) => (c.draftY = Math.max(0, Math.min(state.image.height - c.draftHeight, v))), 'Crop Y', true);
+    this.bindNumInput('#inp-crop-w', (v) => (c.draftWidth = Math.max(20, Math.min(state.image.width - c.draftX, v))), 'Crop Width', true);
+    this.bindNumInput('#inp-crop-h', (v) => (c.draftHeight = Math.max(20, Math.min(state.image.height - c.draftY, v))), 'Crop Height', true);
 
-    this.bindNumInput('#inp-crop-x', (v) => {
-      c.draftX = Math.max(0, Math.min(state.image.width - c.draftWidth, v));
-    }, 'Crop X', true);
-    this.bindNumInput('#inp-crop-y', (v) => {
-      c.draftY = Math.max(0, Math.min(state.image.height - c.draftHeight, v));
-    }, 'Crop Y', true);
-    this.bindNumInput('#inp-crop-w', (v) => {
-      c.draftWidth = Math.max(20, Math.min(state.image.width - c.draftX, v));
-    }, 'Crop Width', true);
-    this.bindNumInput('#inp-crop-h', (v) => {
-      c.draftHeight = Math.max(20, Math.min(state.image.height - c.draftY, v));
-    }, 'Crop Height', true);
-
-    this.container.querySelector('#btn-crop-apply')?.addEventListener('click', () => {
-      this.app.tools.cropScale.applyCrop(state);
-    });
-    this.container.querySelector('#btn-crop-cancel')?.addEventListener('click', () => {
-      this.app.tools.cropScale.cancelCrop(state);
-    });
-    this.container.querySelector('#btn-crop-reset')?.addEventListener('click', () => {
-      this.app.tools.cropScale.resetCrop(state);
-    });
+    this.container.querySelector('#btn-crop-apply')?.addEventListener('click', () => this.app.tools.cropScale.applyCrop(state));
+    this.container.querySelector('#btn-crop-cancel')?.addEventListener('click', () => this.app.tools.cropScale.cancelCrop(state));
+    this.container.querySelector('#btn-crop-reset')?.addEventListener('click', () => this.app.tools.cropScale.resetCrop(state));
 
     this.container.querySelector('#btn-rot-ccw')?.addEventListener('click', () => {
       this.app.pushUndo('Rotate Image -90°');
@@ -532,7 +587,6 @@ export class PropertiesPanel {
       this.app.onStateChanged();
     });
 
-    // Scale bindings
     this.container.querySelector('#btn-cal-pick')?.addEventListener('click', () => {
       state.subTools.cropScale = 'scale';
       this.app.tools.cropScale.cancel();
@@ -578,18 +632,12 @@ export class PropertiesPanel {
           <div class="field"><span class="field-label">Thickness</span><input id="def-line-thick" type="number" min="1" max="10" step="0.5" class="input input-mono" value="${td.lineThickness}" /></div>
           <div class="field"><span class="field-label">Opacity</span><input id="def-line-op" type="number" min="0.1" max="1" step="0.1" class="input input-mono" value="${td.lineOpacity}" /></div>
         </div>
-        <p class="section-subtitle">Click two points or drag on the canvas to draw a line. Hold Shift to snap to 45° increments.</p>
+        <p class="section-subtitle">Snaps automatically to grid, endpoints, centers, intersections, and H/V alignment. Hold Shift for 45° snap or Alt to bypass snapping.</p>
       </div>
     `;
-    this.container.querySelector('#def-line-color')?.addEventListener('input', (e) => {
-      td.lineColor = e.target.value;
-    });
-    this.container.querySelector('#def-line-thick')?.addEventListener('change', (e) => {
-      td.lineThickness = Math.max(1, Number(e.target.value) || 2);
-    });
-    this.container.querySelector('#def-line-op')?.addEventListener('change', (e) => {
-      td.lineOpacity = Math.max(0.1, Math.min(1, Number(e.target.value) || 1));
-    });
+    this.container.querySelector('#def-line-color')?.addEventListener('input', (e) => (td.lineColor = e.target.value));
+    this.container.querySelector('#def-line-thick')?.addEventListener('change', (e) => (td.lineThickness = Math.max(1, Number(e.target.value) || 2)));
+    this.container.querySelector('#def-line-op')?.addEventListener('change', (e) => (td.lineOpacity = Math.max(0.1, Math.min(1, Number(e.target.value) || 1))));
   }
 
   renderShapeToolDefaults(state) {
@@ -743,10 +791,32 @@ export class PropertiesPanel {
 
   renderShapeInspector(state, shape) {
     const m = computeShapeMeasurements(shape);
+    const d = m.displayed;
     const cal = state.calibration;
     const unit = cal.displayUnit;
     const prec = cal.precision ?? 2;
     const lockedAttr = shape.locked ? 'disabled' : '';
+
+    // Shape-specific smart geometry readout
+    let specificHtml = '';
+    if (d.radiusPx != null) {
+      specificHtml = `
+        <div class="kv-row"><span class="kv-key">Radius</span><span class="kv-val tabular-nums">${formatLength(d.radiusPx, unit, cal, prec)}</span></div>
+        <div class="kv-row"><span class="kv-key">Diameter</span><span class="kv-val tabular-nums">${formatLength(d.diameterPx, unit, cal, prec)}</span></div>
+        <div class="kv-row"><span class="kv-key">Circumference</span><span class="kv-val tabular-nums">${formatLength(d.perimeterPx, unit, cal, prec)}</span></div>
+      `;
+    } else if (d.majorAxisPx != null) {
+      specificHtml = `
+        <div class="kv-row"><span class="kv-key">Major Axis</span><span class="kv-val tabular-nums">${formatLength(d.majorAxisPx, unit, cal, prec)}</span></div>
+        <div class="kv-row"><span class="kv-key">Minor Axis</span><span class="kv-val tabular-nums">${formatLength(d.minorAxisPx, unit, cal, prec)}</span></div>
+        <div class="kv-row"><span class="kv-key">Rotation</span><span class="kv-val tabular-nums">${(d.rotationDeg || 0).toFixed(1)}°</span></div>
+      `;
+    } else if (d.triangleAltitude) {
+      specificHtml = `
+        <div class="kv-row"><span class="kv-key">Base</span><span class="kv-val tabular-nums">${formatLength(d.triangleAltitude.basePx, unit, cal, prec)}</span></div>
+        <div class="kv-row"><span class="kv-key">Altitude Height</span><span class="kv-val tabular-nums">${formatLength(d.triangleAltitude.heightPx, unit, cal, prec)}</span></div>
+      `;
+    }
 
     this.container.innerHTML = `
       <div class="panel-section">
@@ -820,23 +890,25 @@ export class PropertiesPanel {
           <h3 class="section-title">${m.isDistorted ? 'Displayed (Distorted) Geometry' : 'Shape Measurements'}</h3>
         </div>
         <div class="kv-table">
-          <div class="kv-row"><span class="kv-key">Width &times; Height</span><span class="kv-val tabular-nums">${formatLength(m.displayed.widthPx, unit, cal, prec)} &times; ${formatLength(m.displayed.heightPx, unit, cal, prec)}</span></div>
-          <div class="kv-row"><span class="kv-key">Aspect Ratio</span><span class="kv-val tabular-nums">${m.displayed.aspectRatio.toFixed(prec)} : 1</span></div>
-          <div class="kv-row"><span class="kv-key">Perimeter</span><span class="kv-val tabular-nums">${formatLength(m.displayed.perimeterPx, unit, cal, prec)}</span></div>
-          <div class="kv-row"><span class="kv-key">Area</span><span class="kv-val tabular-nums">${formatArea(m.displayed.areaPx2, unit, cal, prec)}</span></div>
+          <div class="kv-row"><span class="kv-key">Center (px)</span><span class="kv-val tabular-nums">(${d.center.x.toFixed(1)}, ${d.center.y.toFixed(1)})</span></div>
+          <div class="kv-row"><span class="kv-key">Width &times; Height</span><span class="kv-val tabular-nums">${formatLength(d.widthPx, unit, cal, prec)} &times; ${formatLength(d.heightPx, unit, cal, prec)}</span></div>
+          <div class="kv-row"><span class="kv-key">Aspect Ratio</span><span class="kv-val tabular-nums">${d.aspectRatio.toFixed(prec)} : 1</span></div>
+          ${specificHtml}
+          <div class="kv-row"><span class="kv-key">Perimeter</span><span class="kv-val tabular-nums">${formatLength(d.perimeterPx, unit, cal, prec)}</span></div>
+          <div class="kv-row"><span class="kv-key">Area</span><span class="kv-val tabular-nums">${formatArea(d.areaPx2, unit, cal, prec)}</span></div>
           ${
-            m.displayed.diagonalsPx.length
-              ? `<div class="kv-row"><span class="kv-key">Diagonals</span><span class="kv-val tabular-nums">${m.displayed.diagonalsPx.slice(0, 2).map((d) => formatLength(d.lengthPx, unit, cal, prec)).join(' / ')}</span></div>`
+            d.diagonalsPx.length
+              ? `<div class="kv-row"><span class="kv-key">Diagonals</span><span class="kv-val tabular-nums">${d.diagonalsPx.slice(0, 2).map((dg) => formatLength(dg.lengthPx, unit, cal, prec)).join(' / ')}</span></div>`
               : ''
           }
           ${
-            m.displayed.sideLengthsPx.length && m.displayed.sideLengthsPx.length <= 8
-              ? `<div class="kv-row"><span class="kv-key">Side Lengths</span><span class="kv-val tabular-nums">${m.displayed.sideLengthsPx.map((s) => formatLength(s, unit, cal, prec)).join(', ')}</span></div>`
+            d.sideLengthsPx.length && d.sideLengthsPx.length <= 8
+              ? `<div class="kv-row"><span class="kv-key">Side Lengths</span><span class="kv-val tabular-nums">${d.sideLengthsPx.map((s) => formatLength(s, unit, cal, prec)).join(', ')}</span></div>`
               : ''
           }
           ${
-            m.displayed.internalAnglesDeg.length && m.displayed.internalAnglesDeg.length <= 8
-              ? `<div class="kv-row"><span class="kv-key">Internal Angles</span><span class="kv-val tabular-nums">${m.displayed.internalAnglesDeg.map((a) => `${a.toFixed(1)}°`).join(', ')}</span></div>`
+            d.internalAnglesDeg.length && d.internalAnglesDeg.length <= 8
+              ? `<div class="kv-row"><span class="kv-key">Internal Angles</span><span class="kv-val tabular-nums">${d.internalAnglesDeg.map((a) => `${a.toFixed(1)}°`).join(', ')}</span></div>`
               : ''
           }
         </div>

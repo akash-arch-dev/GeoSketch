@@ -1,5 +1,5 @@
 /**
- * Export Manager: Project JSON, Annotated PNG, and Measurements CSV
+ * GeoSketch Export Manager: Project JSON, Annotated PNG, and Measurements CSV
  */
 import { computeLineMetrics } from '../geometry/lines.js';
 import { computeAngleMetrics } from '../geometry/angles.js';
@@ -20,10 +20,10 @@ function triggerDownload(blob, filename) {
 }
 
 function sanitizeFilename(name) {
-  return (name || 'imageratio-study')
+  return (name || 'geosketch-study')
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'imageratio-study';
+    .replace(/^-+|-+$/g, '') || 'geosketch-study';
 }
 
 export function exportProjectJson(state, coords) {
@@ -53,7 +53,7 @@ export function exportMeasurementsCsv(state) {
   const cal = state.calibration;
 
   const rows = [];
-  rows.push(['ImageRatio Measurement Export']);
+  rows.push(['GeoSketch Measurement Export']);
   rows.push(['Project Name', state.projectName]);
   rows.push(['Image File', state.image.name]);
   rows.push(['Image Dimensions (px)', `${state.image.width} x ${state.image.height}`]);
@@ -94,7 +94,7 @@ export function exportMeasurementsCsv(state) {
   }
   rows.push([]);
 
-  // Ratios if >= 2 lines compared or available
+  // Ratios
   const ratioSource =
     state.ratioCompareIds.length >= 2
       ? state.lines.filter((l) => state.ratioCompareIds.includes(l.id))

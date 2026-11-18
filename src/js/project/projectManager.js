@@ -1,8 +1,10 @@
 /**
- * Project Lifecycle, Default Workspace State, Serialization & Autosave Manager
+ * GeoSketch Project Lifecycle, Default Workspace State, Serialization & Autosave Manager
  */
 import { createDefaultCrop } from '../image/cropManager.js';
 import { loadImageFromDataUrl } from '../image/imageLoader.js';
+import { createDefaultRenderConfig, createDefaultDisplaySettings } from '../core/renderConfig.js';
+import { createDefaultSnappingConfig } from '../core/snapEngine.js';
 import {
   saveProjectToDB,
   getProjectFromDB,
@@ -22,7 +24,9 @@ export function createDefaultGuides() {
       columns: 4,
       cellWidth: 100,
       cellHeight: 100,
-      color: '#60a5fa',
+      offsetX: 0,
+      offsetY: 0,
+      color: '#38bdf8',
       opacity: 0.45,
       thickness: 1,
       style: 'solid', // 'solid' | 'dashed' | 'dotted'
@@ -78,6 +82,9 @@ export function createInitialState(prefs = loadPreferences()) {
       precision: prefs.precision ?? 2,
     },
     guides: createDefaultGuides(),
+    renderConfig: createDefaultRenderConfig(),
+    display: createDefaultDisplaySettings(),
+    snapping: createDefaultSnappingConfig(),
     lines: [],
     shapes: [],
     angles: [],
@@ -85,7 +92,7 @@ export function createInitialState(prefs = loadPreferences()) {
     ratioCompareIds: [],
     activeTool: 'select',
     subTools: {
-      guides: 'grid', // 'grid' | 'presets' | 'customH' | 'customV' | 'customAngled'
+      guides: 'grid', // 'grid' | 'customH' | 'customV' | 'customAngled'
       cropScale: 'crop', // 'crop' | 'scale'
       line: 'draw', // 'draw'
       shape: 'rectangle', // 'rectangle' | 'square' | 'circle' | 'ellipse' | 'triangle' | 'polygon' | 'customPolygon' | 'freehand'
@@ -111,7 +118,7 @@ export function createInitialState(prefs = loadPreferences()) {
 
 export function serializeProject(state, coords) {
   return {
-    version: 1,
+    version: 2,
     id: state.projectId,
     name: state.projectName || 'Untitled Study',
     updatedAt: Date.now(),
@@ -134,6 +141,9 @@ export function serializeProject(state, coords) {
     crop: JSON.parse(JSON.stringify(state.crop)),
     calibration: JSON.parse(JSON.stringify(state.calibration)),
     guides: JSON.parse(JSON.stringify(state.guides)),
+    renderConfig: JSON.parse(JSON.stringify(state.renderConfig)),
+    display: JSON.parse(JSON.stringify(state.display)),
+    snapping: JSON.parse(JSON.stringify(state.snapping)),
     lines: JSON.parse(JSON.stringify(state.lines)),
     shapes: JSON.parse(JSON.stringify(state.shapes)),
     angles: JSON.parse(JSON.stringify(state.angles)),
@@ -180,6 +190,10 @@ export async function deserializeProject(jsonObj, currentPrefs = loadPreferences
       customLines: Array.isArray(jsonObj.guides.customLines) ? jsonObj.guides.customLines : [],
     };
   }
+  if (jsonObj.renderConfig) state.renderConfig = { ...state.renderConfig, ...jsonObj.renderConfig };
+  if (jsonObj.display) state.display = { ...state.display, ...jsonObj.display };
+  if (jsonObj.snapping) state.snapping = { ...state.snapping, ...jsonObj.snapping };
+
   state.lines = Array.isArray(jsonObj.lines) ? jsonObj.lines : [];
   state.shapes = Array.isArray(jsonObj.shapes) ? jsonObj.shapes : [];
   state.angles = Array.isArray(jsonObj.angles) ? jsonObj.angles : [];

@@ -5,7 +5,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   padding: 0 12px;
   background: var(--bg-surface-0);
   border-bottom: 1px solid var(--border-subtle);
@@ -34,8 +34,11 @@
   background: var(--bg-surface-2);
 }
 
-.btn-icon-text svg {
-  color: var(--accent-primary);
+.topbar-logo-img {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: block;
 }
 
 .brand-wordmark {
@@ -49,7 +52,7 @@
 }
 
 .project-name-input {
-  width: 170px;
+  width: 165px;
   height: 26px;
   padding: 0 8px;
   background: transparent;
@@ -107,6 +110,12 @@
   color: var(--text-primary);
 }
 
+.tool-btn.active {
+  background: var(--accent-primary-tint);
+  border-color: rgba(56, 189, 248, 0.45);
+  color: var(--accent-primary);
+}
+
 .tool-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
@@ -129,7 +138,7 @@
 .ws-topbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -140,7 +149,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   padding: 5px 12px;
   background: var(--bg-surface-1);
   border-bottom: 1px solid var(--border-subtle);
@@ -150,7 +159,7 @@
 .tool-categories {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex-shrink: 0;
 }
 
@@ -159,12 +168,12 @@
   align-items: center;
   gap: 6px;
   height: 32px;
-  padding: 0 11px;
+  padding: 0 10px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
@@ -178,8 +187,8 @@
 
 .cat-btn.active {
   background: var(--accent-primary-tint);
-  border-color: rgba(59, 130, 246, 0.45);
-  color: #93c5fd;
+  border-color: rgba(56, 189, 248, 0.45);
+  color: var(--accent-primary);
 }
 
 .subtool-strip {
@@ -217,7 +226,8 @@
 .subtool-btn.active {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
-  color: #ffffff;
+  color: var(--accent-primary-text);
+  font-weight: 600;
 }
 
 .toolbar-units-group {

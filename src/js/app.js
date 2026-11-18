@@ -1,12 +1,14 @@
 /**
- * ImageRatio — Main Application Controller
- * Orchestrates Screen A (Upload), Screen B (Workspace), Tools, Canvas, History, and Project Persistence.
+ * GeoSketch — Main Application Controller
+ * Orchestrates Landing/Upload Screen, Workspace, Tools, Snapping, Smart Annotations,
+ * Zoom-Adaptive Rendering, Command Palette, Keyboard Shortcuts, and Project Persistence.
  */
 import { CoordinateSystem } from './core/coordinateSystem.js';
 import { HistoryManager } from './core/historyManager.js';
 import { SelectionManager } from './core/selectionManager.js';
 import { CanvasEngine } from './core/canvasEngine.js';
 import { EventManager } from './core/eventManager.js';
+import { ShortcutManager, DEFAULT_SHORTCUTS, eventToCombo } from './core/shortcutManager.js';
 
 import {
   loadImageFromFile,
@@ -39,15 +41,17 @@ import {
 } from './project/exportManager.js';
 import { deleteObjectById } from './layers/layerManager.js';
 
-class ImageRatioApp {
+class GeoSketchApp {
   constructor() {
     this.currentScreen = 'upload';
     this.pendingImage = null;
+    this.isCapturingShortcut = false;
 
     this.coords = new CoordinateSystem();
     this.history = new HistoryManager();
     this.selection = new SelectionManager();
     this.projectManager = new ProjectManager();
+    this.shortcuts = new ShortcutManager();
 
     this.state = createInitialState();
 
@@ -89,7 +93,6 @@ class ImageRatioApp {
       }
     });
 
-    // Global JSON file import input
     document.getElementById('json-import-input').addEventListener('change', async (e) => {
       const file = e.target.files?.[0];
       e.target.value = '';
@@ -176,7 +179,6 @@ class ImageRatioApp {
       }
     });
 
-    // Global Ctrl+V clipboard paste on Upload screen
     window.addEventListener('paste', async (e) => {
       if (this.currentScreen !== 'upload') return;
       const items = e.clipboardData?.items;
@@ -207,12 +209,12 @@ class ImageRatioApp {
       this.openImageInWorkspace(this.pendingImage);
     });
 
-    // Sample Reference Studies
     document.querySelectorAll('.sample-card').forEach((card) => {
       card.addEventListener('click', async () => {
         this.clearUploadError();
         try {
-          const loaded = await loadImageFromUrl(card.dataset.sampleSrc, card.dataset.sampleName);
+          const sampleSrc = card.querySelector('img')?.src || card.dataset.sampleSrc;
+          const loaded = await loadImageFromUrl(sampleSrc, card.dataset.sampleName);
           this.setPendingUploadImage(loaded);
           this.openImageInWorkspace(loaded);
         } catch (err) {
@@ -259,7 +261,6 @@ class ImageRatioApp {
   }
 
   openImageInWorkspace(loaded) {
-    // If replacing image while keeping project or starting fresh:
     const fresh = createInitialState();
     fresh.projectName = loaded.name.replace(/\.[^.]+$/, '') || 'Untitled Study';
     fresh.image = {
@@ -311,11 +312,15 @@ class ImageRatioApp {
     return this.tools[this.state.activeTool] || null;
   }
 
-  setActiveTool(toolName) {
+  setActiveTool(toolName, subTool = null) {
     const prevTool = this.getActiveToolController();
     if (prevTool && prevTool.cancel) prevTool.cancel();
 
     this.state.activeTool = toolName;
+    if (subTool && this.state.subTools[toolName] !== undefined) {
+      this.state.subTools[toolName] = subTool;
+    }
+
     if (toolName === 'cropScale' && this.state.subTools.cropScale === 'crop') {
       this.state.crop.draftX = this.state.crop.x;
       this.state.crop.draftY = this.state.crop.y;
@@ -325,6 +330,59 @@ class ImageRatioApp {
 
     this.eventManager.updateCursor();
     this.onStateChanged({ skipHistory: true, skipAutosave: true });
+  }
+
+  executeAction(actionId) {
+    switch (actionId) {
+      case 'undo': this.undo(); break;
+      case 'redo': this.redo(); break;
+      case 'copy': {
+        const count = this.selection.copySelected(this.state);
+        if (count > 0) this.notify(`Copied ${count} object${count > 1 ? 's' : ''}.`);
+        break;
+      }
+      case 'paste': this.pasteSelected(); break;
+      case 'duplicate': this.duplicateSelected(); break;
+      case 'selectAll': this.selectAll(); break;
+      case 'delete': this.deleteSelected(); break;
+      case 'cancel': {
+        const tool = this.getActiveToolController();
+        if (tool && tool.cancel) tool.cancel();
+        this.eventManager.cancelActiveDrag();
+        this.renderCanvas();
+        this.ui.updateHintBanner();
+        break;
+      }
+      case 'toolSelect': this.setActiveTool('select'); break;
+      case 'toolPan': this.setActiveTool('pan'); break;
+      case 'toolGuides': this.setActiveTool('guides'); break;
+      case 'toolCropScale': this.setActiveTool('cropScale'); break;
+      case 'toolLine': this.setActiveTool('line'); break;
+      case 'toolRect': this.setActiveTool('shape', 'rectangle'); break;
+      case 'toolCircle': this.setActiveTool('shape', 'circle'); break;
+      case 'toolEllipse': this.setActiveTool('shape', 'ellipse'); break;
+      case 'toolPolygon': this.setActiveTool('shape', 'polygon'); break;
+      case 'toolAngle': this.setActiveTool('angle'); break;
+      case 'fitScreen': this.fitToScreen(); break;
+      case 'zoom100': this.resetZoom(); break;
+      case 'zoomIn': this.zoomBy(1.2); break;
+      case 'zoomOut': this.zoomBy(1 / 1.2); break;
+      case 'saveProject': this.handleProjectAction('save-project'); break;
+      case 'openProject': this.handleProjectAction('open-project'); break;
+      case 'commandPalette': this.openCommandPalette(); break;
+      case 'shortcutsHelp': this.openShortcutsModal(); break;
+      default: break;
+    }
+  }
+
+  selectAll() {
+    const ids = [];
+    for (const l of this.state.lines) if (l.visible !== false) ids.push(l.id);
+    for (const s of this.state.shapes) if (s.visible !== false) ids.push(s.id);
+    for (const a of this.state.angles) if (a.visible !== false) ids.push(a.id);
+    this.state.selectedIds = ids;
+    this.setActiveTool('select');
+    this.notify(`Selected ${ids.length} object${ids.length === 1 ? '' : 's'}.`);
   }
 
   fitToScreen() {
@@ -431,7 +489,10 @@ class ImageRatioApp {
   pasteSelected() {
     if (!this.selection.clipboard.length) return;
     this.pushUndo('Paste Objects');
-    const created = this.selection.pasteClipboard(this.state, (cat) => `${cat}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1000)}`);
+    const created = this.selection.pasteClipboard(
+      this.state,
+      (cat) => `${cat}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1000)}`
+    );
     if (created.length) {
       this.onStateChanged();
     }
@@ -545,6 +606,259 @@ class ImageRatioApp {
     this.notify('Annotated PNG exported.', 'success');
   }
 
+  openDisplaySettingsModal() {
+    const d = this.state.display;
+    const rc = this.state.renderConfig;
+    const sn = this.state.snapping;
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="panel-section">
+          <h3 class="section-title">Smart Annotations &amp; Visibility</h3>
+          <label class="checkbox-row"><span>Show Measurements</span><input type="checkbox" data-d="showMeasurements" ${d.showMeasurements !== false ? 'checked' : ''} /></label>
+          <label class="checkbox-row"><span>Show Labels (hiding never hides geometry)</span><input type="checkbox" data-d="showLabels" ${d.showLabels !== false ? 'checked' : ''} /></label>
+          <label class="checkbox-row"><span>Show Object Names</span><input type="checkbox" data-d="showObjectNames" ${d.showObjectNames !== false ? 'checked' : ''} /></label>
+          <label class="checkbox-row"><span>Show Control Points</span><input type="checkbox" data-d="showControlPoints" ${d.showControlPoints !== false ? 'checked' : ''} /></label>
+          <label class="checkbox-row"><span>Show Selection Handles</span><input type="checkbox" data-d="showHandles" ${d.showHandles !== false ? 'checked' : ''} /></label>
+          <label class="checkbox-row"><span>Show Smart Geometry Explainers</span><input type="checkbox" data-d="showSmartGeometry" ${d.showSmartGeometry !== false ? 'checked' : ''} /></label>
+          <div class="field">
+            <span class="field-label">Smart Geometry Scope</span>
+            <select id="m-smart-scope" class="select">
+              <option value="selected" ${d.smartAnnotationScope === 'selected' ? 'selected' : ''}>Selected Object Only</option>
+              <option value="all" ${d.smartAnnotationScope === 'all' ? 'selected' : ''}>All Objects</option>
+              <option value="none" ${d.smartAnnotationScope === 'none' ? 'selected' : ''}>Off</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h3 class="section-title">Zoom-Adaptive Overlay Rendering</h3>
+          <div class="prop-grid-2">
+            <div class="field">
+              <span class="field-label">Line &amp; Shape Thickness</span>
+              <select id="m-rc-line" class="select">
+                <option value="screen-constant" ${rc.lineScaleMode === 'screen-constant' ? 'selected' : ''}>Screen-Constant px</option>
+                <option value="adaptive" ${rc.lineScaleMode === 'adaptive' ? 'selected' : ''}>Adaptive Clamped</option>
+                <option value="image-scaled" ${rc.lineScaleMode === 'image-scaled' ? 'selected' : ''}>Image-Scaled</option>
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Grid Line Thickness</span>
+              <select id="m-rc-grid" class="select">
+                <option value="screen-constant" ${rc.gridScaleMode === 'screen-constant' ? 'selected' : ''}>Screen-Constant px</option>
+                <option value="adaptive" ${rc.gridScaleMode === 'adaptive' ? 'selected' : ''}>Adaptive Readable</option>
+              </select>
+            </div>
+            <div class="field">
+              <span class="field-label">Label Text Scale (${rc.labelScale}x)</span>
+              <input id="m-rc-lscale" type="range" min="0.75" max="1.5" step="0.05" value="${rc.labelScale}" class="range-input" />
+            </div>
+            <div class="field">
+              <span class="field-label">Handle Radius (${rc.handleRadiusPx} px)</span>
+              <input id="m-rc-hradius" type="range" min="3" max="9" step="1" value="${rc.handleRadiusPx}" class="range-input" />
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section" style="border-bottom:none;padding-bottom:0;">
+          <h3 class="section-title">Snapping Sensitivity</h3>
+          <div class="field-inline">
+            <label for="m-snap-sens">Snap Threshold (${sn.sensitivityPx} screen px)</label>
+            <input id="m-snap-sens" type="range" min="4" max="28" step="1" value="${sn.sensitivityPx}" class="range-input" style="max-width:160px;" />
+          </div>
+        </div>
+      </div>
+    `;
+
+    wrap.querySelectorAll('[data-d]').forEach((chk) => {
+      chk.addEventListener('change', () => {
+        d[chk.dataset.d] = chk.checked;
+        this.onStateChanged({ skipHistory: true });
+      });
+    });
+    wrap.querySelector('#m-smart-scope').addEventListener('change', (e) => {
+      d.smartAnnotationScope = e.target.value;
+      this.onStateChanged({ skipHistory: true });
+    });
+    wrap.querySelector('#m-rc-line').addEventListener('change', (e) => {
+      rc.lineScaleMode = e.target.value;
+      this.onStateChanged({ skipHistory: true });
+    });
+    wrap.querySelector('#m-rc-grid').addEventListener('change', (e) => {
+      rc.gridScaleMode = e.target.value;
+      this.onStateChanged({ skipHistory: true });
+    });
+    wrap.querySelector('#m-rc-lscale').addEventListener('input', (e) => {
+      rc.labelScale = Number(e.target.value);
+      this.renderCanvas();
+    });
+    wrap.querySelector('#m-rc-hradius').addEventListener('input', (e) => {
+      rc.handleRadiusPx = Number(e.target.value);
+      this.renderCanvas();
+    });
+    wrap.querySelector('#m-snap-sens').addEventListener('input', (e) => {
+      sn.sensitivityPx = Number(e.target.value);
+    });
+
+    openModal('Smart View & Zoom-Adaptive Settings', wrap);
+  }
+
+  openCommandPalette() {
+    const commands = [
+      ...DEFAULT_SHORTCUTS.map((s) => ({
+        id: s.id,
+        label: s.label,
+        category: s.category,
+        shortcut: this.shortcuts.getCombo(s.id),
+        run: () => this.executeAction(s.id),
+      })),
+      { id: 'cmd-grid', label: 'Toggle Grid Overlay', category: 'Visual Guides', shortcut: '', run: () => { this.pushUndo('Toggle Grid'); this.state.guides.grid.visible = !this.state.guides.grid.visible; this.onStateChanged(); } },
+      { id: 'cmd-thirds', label: 'Toggle Rule of Thirds', category: 'Visual Guides', shortcut: '', run: () => { this.pushUndo('Toggle Rule of Thirds'); this.state.guides.ruleOfThirds = !this.state.guides.ruleOfThirds; this.onStateChanged(); } },
+      { id: 'cmd-golden', label: 'Toggle Golden Ratio Guide', category: 'Visual Guides', shortcut: '', run: () => { this.pushUndo('Toggle Golden Ratio'); this.state.guides.goldenRatio = !this.state.guides.goldenRatio; this.onStateChanged(); } },
+      { id: 'cmd-snap', label: 'Toggle Construction Snapping', category: 'Assistance', shortcut: '', run: () => { this.state.snapping.enabled = !this.state.snapping.enabled; this.onStateChanged({ skipHistory: true }); } },
+      { id: 'cmd-view', label: 'Open Smart View & Zoom-Adaptive Settings', category: 'View', shortcut: '', run: () => this.openDisplaySettingsModal() },
+      { id: 'cmd-png', label: 'Export Annotated PNG', category: 'Export', shortcut: '', run: () => this.exportPng() },
+      { id: 'cmd-csv', label: 'Export Measurements CSV', category: 'Export', shortcut: '', run: () => exportMeasurementsCsv(this.state) },
+      { id: 'cmd-json', label: 'Export Project JSON', category: 'Export', shortcut: '', run: () => exportProjectJson(this.state, this.coords) },
+    ];
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <input type="text" id="palette-search-input" class="palette-search" placeholder="Search tools, guides, shortcuts, or exports..." />
+      <div id="palette-list" class="palette-list"></div>
+    `;
+
+    const input = wrap.querySelector('#palette-search-input');
+    const listEl = wrap.querySelector('#palette-list');
+    let activeIdx = 0;
+    let filtered = commands;
+
+    const renderList = () => {
+      listEl.innerHTML = filtered
+        .map(
+          (c, i) => `
+          <button type="button" class="palette-item ${i === activeIdx ? 'active' : ''}" data-idx="${i}">
+            <span><strong>${this.escape(c.label)}</strong><span class="palette-item-cat">${this.escape(c.category)}</span></span>
+            ${c.shortcut ? `<kbd>${this.escape(c.shortcut)}</kbd>` : ''}
+          </button>`
+        )
+        .join('');
+      listEl.querySelectorAll('.palette-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const cmd = filtered[Number(btn.dataset.idx)];
+          closeModal();
+          cmd?.run();
+        });
+      });
+    };
+
+    input.addEventListener('input', () => {
+      const q = input.value.trim().toLowerCase();
+      filtered = q
+        ? commands.filter((c) => c.label.toLowerCase().includes(q) || c.category.toLowerCase().includes(q))
+        : commands;
+      activeIdx = 0;
+      renderList();
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        activeIdx = Math.min(filtered.length - 1, activeIdx + 1);
+        renderList();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        activeIdx = Math.max(0, activeIdx - 1);
+        renderList();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const cmd = filtered[activeIdx];
+        closeModal();
+        cmd?.run();
+      }
+    });
+
+    openModal('Command Palette', wrap);
+    document.getElementById('modal-dialog').classList.add('palette-dialog');
+    renderList();
+    setTimeout(() => input.focus(), 20);
+  }
+
+  openShortcutsModal() {
+    const wrap = document.createElement('div');
+    const renderTable = () => {
+      wrap.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;">
+          <span class="section-subtitle">Click Rebind on any editable shortcut and press a new key combination.</span>
+          <button type="button" id="btn-reset-shortcuts" class="btn btn-xs btn-secondary">Reset Defaults</button>
+        </div>
+        <table class="shortcut-table">
+          <thead><tr><th>Action</th><th>Category</th><th>Shortcut</th><th></th></tr></thead>
+          <tbody>
+            ${DEFAULT_SHORTCUTS.map(
+              (s) => `
+              <tr>
+                <td>${this.escape(s.label)}</td>
+                <td class="section-subtitle">${this.escape(s.category)}</td>
+                <td><kbd>${this.escape(this.shortcuts.getCombo(s.id))}</kbd></td>
+                <td style="text-align:right;">
+                  ${
+                    s.fixed
+                      ? `<span class="section-subtitle">Fixed</span>`
+                      : `<button type="button" class="btn btn-xs btn-secondary shortcut-rebind-btn" data-rebind="${s.id}">Rebind</button>`
+                  }
+                </td>
+              </tr>`
+            ).join('')}
+          </tbody>
+        </table>
+      `;
+
+      wrap.querySelector('#btn-reset-shortcuts').addEventListener('click', () => {
+        this.shortcuts.resetDefaults();
+        this.ui.toolbar.updateShortcutTooltips();
+        renderTable();
+        this.notify('Keyboard shortcuts reset to defaults.', 'success');
+      });
+
+      wrap.querySelectorAll('[data-rebind]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.rebind;
+          btn.textContent = 'Press key...';
+          this.isCapturingShortcut = true;
+
+          const onKey = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (ev.key === 'Escape') {
+              this.isCapturingShortcut = false;
+              window.removeEventListener('keydown', onKey, true);
+              renderTable();
+              return;
+            }
+            const combo = eventToCombo(ev);
+            if (!combo) return;
+            this.isCapturingShortcut = false;
+            window.removeEventListener('keydown', onKey, true);
+            const res = this.shortcuts.rebind(id, combo);
+            if (!res.ok) {
+              this.notify(res.error, 'error');
+            } else {
+              this.ui.toolbar.updateShortcutTooltips();
+              this.notify(`Rebound to ${combo}`, 'success');
+            }
+            renderTable();
+          };
+          window.addEventListener('keydown', onKey, true);
+        });
+      });
+    };
+
+    renderTable();
+    openModal('Keyboard Shortcuts Reference', wrap);
+  }
+
   async openSavedProjectsModal() {
     try {
       const projects = await this.projectManager.listSaved();
@@ -582,7 +896,7 @@ class ImageRatioApp {
                 this.fitToScreen();
               }
               this.onStateChanged({ skipHistory: true, skipAutosave: true });
-              closeModal();
+              this.closeActiveModal();
               this.notify(`Opened "${this.state.projectName}".`, 'success');
             } catch (err) {
               this.notify(err.message, 'error');
@@ -620,10 +934,16 @@ class ImageRatioApp {
     this.onStateChanged({ skipHistory: true });
   }
 
+  closeActiveModal() {
+    this.isCapturingShortcut = false;
+    document.getElementById('modal-dialog')?.classList.remove('palette-dialog');
+    closeModal();
+  }
+
   bindModal() {
-    document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-close-btn').addEventListener('click', () => this.closeActiveModal());
     document.getElementById('modal-backdrop').addEventListener('click', (e) => {
-      if (e.target.id === 'modal-backdrop') closeModal();
+      if (e.target.id === 'modal-backdrop') this.closeActiveModal();
     });
   }
 
@@ -637,5 +957,5 @@ class ImageRatioApp {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  window.imageRatioApp = new ImageRatioApp();
+  window.geoSketchApp = new GeoSketchApp();
 });

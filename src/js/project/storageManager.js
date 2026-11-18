@@ -1,11 +1,11 @@
 /**
- * IndexedDB & LocalStorage Persistence Manager
+ * IndexedDB & LocalStorage Persistence Manager for GeoSketch
  */
 
-const DB_NAME = 'ImageRatioDB';
+const DB_NAME = 'GeoSketchDB';
 const DB_VERSION = 1;
 const STORE_PROJECTS = 'projects';
-const PREFS_KEY = 'imageratio_prefs_v1';
+const PREFS_KEY = 'geosketch_prefs_v1';
 
 function openDB() {
   return new Promise((resolve, reject) => {

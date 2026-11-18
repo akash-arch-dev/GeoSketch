@@ -1,16 +1,15 @@
 /**
- * Angle Measurement Tool Controller
- * Supports 3-Point Angle, Two Intersecting Lines, and From Selected Lines.
+ * Angle Measurement Tool Controller (with Construction Snapping)
  */
 import { angleFromTwoLines } from '../geometry/angles.js';
 import { distance } from '../geometry/points.js';
 import { createAngleObject } from '../layers/objectManager.js';
+import { resolveSnap } from '../core/snapEngine.js';
 
 export class AngleMeasurementTool {
   constructor(app) {
     this.app = app;
     this.points = [];
-    // For twoLines mode:
     this.line1 = null;
     this.activeStart = null;
   }
@@ -26,7 +25,7 @@ export class AngleMeasurementTool {
   getHint(state) {
     const sub = state.subTools.angle;
     if (sub === 'threePoint') {
-      if (this.points.length === 0) return 'Step 1/3: Click first ray endpoint.';
+      if (this.points.length === 0) return 'Step 1/3: Click first ray endpoint (snaps to endpoints/grid).';
       if (this.points.length === 1) return 'Step 2/3: Click angle vertex.';
       return 'Step 3/3: Click second ray endpoint.';
     }
@@ -36,14 +35,18 @@ export class AngleMeasurementTool {
       if (this.line1 && !this.activeStart) return 'Draw second intersecting line.';
       return 'Click end of second line to compute intersection angle.';
     }
-    return 'Select 2 existing measurement lines in the canvas or sidebar to compute their angle.';
+    return 'Click 2 existing measurement lines to compute their intersection angle.';
   }
 
   onPointerDown(imgPt, e, state) {
     const sub = state.subTools.angle;
+    const snapped = resolveSnap(imgPt, state, this.app.coords, {
+      bypass: e.altKey,
+      anchorPt: this.points.length ? this.points[this.points.length - 1] : this.activeStart,
+    });
 
     if (sub === 'threePoint') {
-      this.points.push({ ...imgPt });
+      this.points.push({ x: snapped.x, y: snapped.y });
       if (this.points.length === 3) {
         this.app.pushUndo('Measure 3-Point Angle');
         const ang = createAngleObject(
@@ -63,21 +66,22 @@ export class AngleMeasurementTool {
         state.selectedIds = [ang.id];
         this.points = [];
         this.app.onStateChanged();
+      } else {
+        this.app.ui.updateHintBanner();
       }
       return;
     }
 
     if (sub === 'twoLines') {
       if (!this.activeStart) {
-        this.activeStart = { ...imgPt };
+        this.activeStart = { x: snapped.x, y: snapped.y };
       } else {
-        this.completeTwoLineSegment(imgPt, state);
+        this.completeTwoLineSegment(snapped, state);
       }
       return;
     }
 
     if (sub === 'fromLines') {
-      // Allow Shift-free toggling of lines directly when in fromLines mode
       const tol = this.app.coords.screenDistToImageDist(10);
       const hit = this.app.selection.hitTestObjectBody(state, imgPt, tol);
       if (hit && hit.category === 'line') {
@@ -95,47 +99,55 @@ export class AngleMeasurementTool {
         this.app.onStateChanged({ skipAutosave: true });
       }
     }
-    void e;
   }
 
   onPointerMove(imgPt, e, state) {
     const sub = state.subTools.angle;
+    if (sub === 'fromLines') return null;
+
+    const snapped = resolveSnap(imgPt, state, this.app.coords, {
+      bypass: e.altKey,
+      anchorPt: this.points.length ? this.points[this.points.length - 1] : this.activeStart,
+    });
+
     if (sub === 'threePoint' && this.points.length > 0) {
-      return { type: 'angle', points: this.points, cursor: imgPt };
+      return { type: 'angle', points: this.points, cursor: snapped, snap: snapped };
     }
     if (sub === 'twoLines' && (this.line1 || this.activeStart)) {
       return {
         type: 'twoLinesAngle',
         line1: this.line1,
         activeStart: this.activeStart,
-        cursor: imgPt,
+        cursor: snapped,
+        snap: snapped,
       };
     }
-    void e;
-    void state;
-    return null;
+    return snapped.snapped ? { type: 'snapOnly', snap: snapped } : null;
   }
 
   onPointerUp(imgPt, e, state) {
     if (state.subTools.angle === 'twoLines' && this.activeStart) {
-      if (distance(this.activeStart, imgPt) > 12) {
-        this.completeTwoLineSegment(imgPt, state);
+      const snapped = resolveSnap(imgPt, state, this.app.coords, {
+        bypass: e.altKey,
+        anchorPt: this.activeStart,
+      });
+      if (distance(this.activeStart, snapped) > 12) {
+        this.completeTwoLineSegment(snapped, state);
       }
     }
-    void e;
   }
 
   completeTwoLineSegment(endPt, state) {
     if (distance(this.activeStart, endPt) < 4) return;
     if (!this.line1) {
-      this.line1 = { p1: { ...this.activeStart }, p2: { ...endPt } };
+      this.line1 = { p1: { ...this.activeStart }, p2: { x: endPt.x, y: endPt.y } };
       this.activeStart = null;
       this.app.renderCanvas({ type: 'twoLinesAngle', line1: this.line1 });
       this.app.ui.updateHintBanner();
       return;
     }
 
-    const line2 = { p1: { ...this.activeStart }, p2: { ...endPt } };
+    const line2 = { p1: { ...this.activeStart }, p2: { x: endPt.x, y: endPt.y } };
     const res = angleFromTwoLines(this.line1.p1, this.line1.p2, line2.p1, line2.p2);
     this.line1 = null;
     this.activeStart = null;

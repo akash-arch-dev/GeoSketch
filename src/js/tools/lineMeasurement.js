@@ -1,9 +1,10 @@
 /**
- * Line Measurement Tool Controller
+ * Line Measurement Tool Controller (with Construction Snapping & 45° Shift Constraint)
  */
 import { distance } from '../geometry/points.js';
 import { constrainLineAngle } from '../geometry/lines.js';
 import { createMeasurementLine } from '../layers/objectManager.js';
+import { resolveSnap } from '../core/snapEngine.js';
 
 export class LineMeasurementTool {
   constructor(app) {
@@ -13,30 +14,41 @@ export class LineMeasurementTool {
   }
 
   getSubTools() {
-    return [{ id: 'draw', label: '2-Point Line (Hold Shift for 45° snap)' }];
+    return [{ id: 'draw', label: '2-Point Line (Shift: 45° snap · Alt: Bypass snap)' }];
   }
 
   getHint() {
     return this.startPt
-      ? 'Click second point to finish line (Shift snaps to 45°). Press Esc to cancel.'
+      ? 'Click second point to finish line (Shift: 45° snap, Alt: disable snap, Esc: cancel).'
       : 'Click & drag (or click two points) to create a measurement line.';
   }
 
   onPointerDown(imgPt, e, state) {
+    const snapped = resolveSnap(imgPt, state, this.app.coords, {
+      bypass: e.altKey,
+      anchorPt: this.startPt,
+    });
     if (!this.startPt) {
-      this.startPt = { ...imgPt };
+      this.startPt = { x: snapped.x, y: snapped.y };
       this.isDragging = true;
     } else {
-      const endPt = e.shiftKey ? constrainLineAngle(this.startPt, imgPt, 45) : imgPt;
+      const endPt = e.shiftKey ? constrainLineAngle(this.startPt, snapped, 45) : snapped;
       this.finishLine(this.startPt, endPt, state);
     }
   }
 
   onPointerMove(imgPt, e, state) {
-    if (!this.startPt) return null;
-    const endPt = e.shiftKey ? constrainLineAngle(this.startPt, imgPt, 45) : imgPt;
+    const snapped = resolveSnap(imgPt, state, this.app.coords, {
+      bypass: e.altKey,
+      anchorPt: this.startPt,
+    });
+    if (!this.startPt) {
+      return snapped.snapped ? { type: 'snapOnly', snap: snapped } : null;
+    }
+    const endPt = e.shiftKey ? constrainLineAngle(this.startPt, snapped, 45) : snapped;
     return {
       type: 'line',
+      snap: snapped,
       line: {
         name: `Line ${state.lines.length + 1}`,
         p1: this.startPt,
@@ -51,7 +63,11 @@ export class LineMeasurementTool {
   onPointerUp(imgPt, e, state) {
     if (this.startPt && this.isDragging) {
       this.isDragging = false;
-      const endPt = e.shiftKey ? constrainLineAngle(this.startPt, imgPt, 45) : imgPt;
+      const snapped = resolveSnap(imgPt, state, this.app.coords, {
+        bypass: e.altKey,
+        anchorPt: this.startPt,
+      });
+      const endPt = e.shiftKey ? constrainLineAngle(this.startPt, snapped, 45) : snapped;
       if (distance(this.startPt, endPt) > 10) {
         this.finishLine(this.startPt, endPt, state);
       }
@@ -68,7 +84,6 @@ export class LineMeasurementTool {
     });
     state.lines.push(line);
     state.selectedIds = [line.id];
-    // Automatically add first lines to ratio comparison convenience if <= 4
     if (state.ratioCompareIds.length < 4) {
       state.ratioCompareIds.push(line.id);
     }

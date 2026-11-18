@@ -1,10 +1,10 @@
 /**
- * Geometric Shape Tools Controller
- * Supports Rectangle, Square, Circle, Ellipse, Triangle, Polygon, Custom Polygon, Freehand.
+ * Geometric Shape Tools Controller (with Construction Snapping & Live Dimension Preview)
  */
 import { distance } from '../geometry/points.js';
 import { simplifyPoints } from '../geometry/polygons.js';
 import { createShapeObject } from '../layers/objectManager.js';
+import { resolveSnap } from '../core/snapEngine.js';
 
 export class ShapeToolsController {
   constructor(app) {
@@ -17,12 +17,12 @@ export class ShapeToolsController {
 
   getSubTools() {
     return [
-      { id: 'rectangle', label: 'Rectangle' },
+      { id: 'rectangle', label: 'Rectangle (R)' },
       { id: 'square', label: 'Square' },
-      { id: 'circle', label: 'Circle' },
-      { id: 'ellipse', label: 'Ellipse' },
+      { id: 'circle', label: 'Circle (C)' },
+      { id: 'ellipse', label: 'Ellipse (E)' },
       { id: 'triangle', label: 'Triangle' },
-      { id: 'polygon', label: 'Polygon' },
+      { id: 'polygon', label: 'Polygon (P)' },
       { id: 'customPolygon', label: 'Custom Polygon' },
       { id: 'freehand', label: 'Freehand' },
     ];
@@ -32,26 +32,30 @@ export class ShapeToolsController {
     const type = state.subTools.shape;
     if (type === 'customPolygon') {
       return this.polyPoints.length
-        ? 'Click to add vertices. Click start point or double-click / press Enter to close.'
+        ? 'Click to add vertices. Click start point, double-click, or press Enter to close.'
         : 'Click to place the first vertex of your custom polygon.';
     }
     if (type === 'freehand') {
       return 'Press and drag to sketch a freehand closed shape.';
     }
-    return 'Click and drag to draw shape (hold Shift to lock 1:1 proportions).';
+    return 'Click & drag to draw shape (Shift: 1:1 ratio · Alt: bypass snap).';
   }
 
   onPointerDown(imgPt, e, state, tolerancePx) {
     const type = state.subTools.shape;
-    this.cursorPt = { ...imgPt };
+    const snapped = resolveSnap(imgPt, state, this.app.coords, {
+      bypass: e.altKey,
+      anchorPt: this.polyPoints.length ? this.polyPoints[this.polyPoints.length - 1] : null,
+    });
+    this.cursorPt = { x: snapped.x, y: snapped.y };
 
     if (type === 'customPolygon') {
-      if (this.polyPoints.length >= 3 && distance(imgPt, this.polyPoints[0]) <= tolerancePx * 1.4) {
+      if (this.polyPoints.length >= 3 && distance(snapped, this.polyPoints[0]) <= tolerancePx * 1.4) {
         this.commitCustomPolygon(state);
         return;
       }
-      this.polyPoints.push({ ...imgPt });
-      this.app.renderCanvas({ type: 'customPolygon', points: this.polyPoints, cursor: imgPt });
+      this.polyPoints.push({ x: snapped.x, y: snapped.y });
+      this.app.renderCanvas({ type: 'customPolygon', points: this.polyPoints, cursor: snapped, snap: snapped });
       return;
     }
 
@@ -60,8 +64,7 @@ export class ShapeToolsController {
       return;
     }
 
-    this.dragStart = { ...imgPt };
-    void e;
+    this.dragStart = { x: snapped.x, y: snapped.y };
   }
 
   onDoubleClick(state) {
@@ -72,10 +75,14 @@ export class ShapeToolsController {
 
   onPointerMove(imgPt, e, state) {
     const type = state.subTools.shape;
-    this.cursorPt = { ...imgPt };
+    const snapped = resolveSnap(imgPt, state, this.app.coords, {
+      bypass: e.altKey || type === 'freehand',
+      anchorPt: this.dragStart || (this.polyPoints.length ? this.polyPoints[this.polyPoints.length - 1] : null),
+    });
+    this.cursorPt = { x: snapped.x, y: snapped.y };
 
     if (type === 'customPolygon' && this.polyPoints.length > 0) {
-      return { type: 'customPolygon', points: this.polyPoints, cursor: imgPt };
+      return { type: 'customPolygon', points: this.polyPoints, cursor: snapped, snap: snapped };
     }
 
     if (type === 'freehand' && this.freehandPoints.length > 0) {
@@ -87,7 +94,7 @@ export class ShapeToolsController {
     }
 
     if (this.dragStart) {
-      const bounds = this.computeDragBounds(this.dragStart, imgPt, type, e.shiftKey);
+      const bounds = this.computeDragBounds(this.dragStart, snapped, type, e.shiftKey);
       const previewShape = createShapeObject(type, bounds, state.shapes.length + 1, {
         sides: state.toolDefaults.polygonSides,
         borderColor: state.toolDefaults.shapeBorderColor,
@@ -95,10 +102,10 @@ export class ShapeToolsController {
         fillOpacity: state.toolDefaults.shapeFillOpacity,
         borderThickness: state.toolDefaults.shapeBorderThickness,
       });
-      return { type: 'shape', shape: previewShape };
+      return { type: 'shape', shape: previewShape, snap: snapped };
     }
 
-    return null;
+    return snapped.snapped ? { type: 'snapOnly', snap: snapped } : null;
   }
 
   onPointerUp(imgPt, e, state) {
@@ -124,7 +131,11 @@ export class ShapeToolsController {
     }
 
     if (this.dragStart) {
-      const bounds = this.computeDragBounds(this.dragStart, imgPt, type, e.shiftKey);
+      const snapped = resolveSnap(imgPt, state, this.app.coords, {
+        bypass: e.altKey,
+        anchorPt: this.dragStart,
+      });
+      const bounds = this.computeDragBounds(this.dragStart, snapped, type, e.shiftKey);
       if (bounds.width >= 6 && bounds.height >= 6) {
         this.app.pushUndo(`Draw ${type}`);
         const shape = createShapeObject(type, bounds, state.shapes.length + 1, {
